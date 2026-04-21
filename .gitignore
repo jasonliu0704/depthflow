@@ -1,2 +1,8 @@
 .cache
 site
+.depthflow-api/
+.venv-depthflow-api/
+dist/
+output/
+*.mp4
+__pycache__/

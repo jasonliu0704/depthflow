@@ -7,9 +7,12 @@ readme      = "readme.md"
 license     = "AGPL-3.0"
 requires-python = ">=3.10"
 dependencies = [
+    "azure-storage-blob",
     "attrs",
     "cyclopts",
+    "dearlog",
     "diskcache",
+    "fastapi",
     "gradio~=6.0",
     "imageio",
     "numpy",
@@ -22,12 +25,21 @@ dependencies = [
     "torch",
     "torchvision",
     "transformers",
+    "python-multipart",
+    "uvicorn",
     "xxhash",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx",
+    "pytest",
 ]
 
 [project.scripts]
 depthflow = "depthflow.__main__:main"
 depth     = "depthflow.__main__:main"
+depthflow-api = "depthflow_api.app:main"
 
 [build-system]
 requires = ["hatchling"]

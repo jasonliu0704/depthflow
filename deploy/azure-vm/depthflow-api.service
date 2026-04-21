@@ -1,0 +1,17 @@
+[Unit]
+Description=DepthFlow Batch API
+After=network.target
+
+[Service]
+Type=simple
+User=azureuser
+Group=azureuser
+WorkingDirectory=/opt/depthflow/DepthFlow
+Environment=ENV_FILE=/opt/depthflow/DepthFlow/.env.depthflow-api
+ExecStart=/usr/bin/env bash /opt/depthflow/DepthFlow/deploy/azure-vm/start.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

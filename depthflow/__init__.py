@@ -1,11 +1,20 @@
-from dearlog import logger  # isort: split
+from importlib.metadata import PackageNotFoundError, metadata
 
-from importlib.metadata import metadata
+try:
+    from dearlog import logger  # type: ignore[import-not-found] # isort: split
+except ImportError:  # pragma: no cover - fallback for local development
+    import logging
 
-__meta__    = metadata(str(__package__))
-__about__   = __meta__.get("Summary")
-__author__  = __meta__.get("Author")
-__version__ = __meta__.get("Version")
+    logger = logging.getLogger(__package__ or "depthflow")
+
+try:
+    __meta__ = metadata(str(__package__))
+except PackageNotFoundError:  # pragma: no cover - local source tree fallback
+    __meta__ = {}
+
+__about__   = __meta__.get("Summary", "Images to parallax effect videos")
+__author__  = __meta__.get("Author", "Tremeschin")
+__version__ = __meta__.get("Version", "0.10.0")
 
 from pathlib import Path
 
