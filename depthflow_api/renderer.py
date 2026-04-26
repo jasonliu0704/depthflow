@@ -11,7 +11,7 @@ from pathlib import Path
 from types import MethodType
 from typing import Callable
 
-from depthflow_api.models import RenderRequest
+from depthflow_api.models import RenderMode, RenderRequest
 
 ProgressCallback = Callable[[int, str], None]
 BACKGROUND_MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac"}
@@ -40,6 +40,58 @@ class ZoomBatchRenderer:
             return original_resize(**kwargs)
 
         scene.resize = MethodType(compat_resize, scene)
+
+    @staticmethod
+    def _apply_motion_profile(scene, mode: RenderMode) -> None:
+        from depthflow.scene import DepthScene
+
+        image_width, image_height = scene.image.size
+        portrait = image_height >= image_width
+
+        # These defaults intentionally trade a bit of raw 3D punch for fewer
+        # edge artifacts in real-estate footage, where straight lines make
+        # distortion much more noticeable than in artwork.
+        scene.state.steady = 0.18
+        scene.state.focus = 0.05
+        scene.state.isometric = 0.22 if portrait else 0.16
+
+        if mode == RenderMode.gentle:
+            scene.state.height = 0.16 if portrait else 0.14
+
+            def motion(self) -> None:
+                DepthScene.update(self)
+                swing = math.sin(self.cycle)
+                self.state.offset = (0.05 * swing, -0.012 * math.cos(self.cycle))
+                self.state.zoom = 0.99 + 0.018 * (1 - math.cos(self.cycle)) / 2
+
+        elif mode == RenderMode.drift:
+            scene.state.height = 0.20 if portrait else 0.18
+            scene.state.isometric = 0.28 if portrait else 0.22
+
+            def motion(self) -> None:
+                DepthScene.update(self)
+                self.state.offset = (
+                    0.085 * math.sin(self.cycle),
+                    0.035 * math.sin(self.cycle * 0.5 - math.pi / 6),
+                )
+                self.state.zoom = 0.985 + 0.028 * (1 - math.cos(self.cycle)) / 2
+
+        else:
+            scene.state.height = 0.24 if portrait else 0.20
+            scene.state.isometric = 0.32 if portrait else 0.24
+
+            def motion(self) -> None:
+                DepthScene.update(self)
+                # A broader sideways move and a touch of vertical drift feels
+                # closer to a phone walkthrough than a static Ken Burns zoom.
+                self.state.offset = (
+                    0.12 * math.sin(self.cycle),
+                    0.03 * math.sin(self.cycle * 0.5 - math.pi / 8),
+                )
+                # Match scripts/test_image_effects.py --modes tour --effects zoom.
+                self.state.zoom = 0.975 + 0.075 * (1 - math.cos(self.cycle)) / 2
+
+        scene.update = MethodType(motion, scene)
 
     def render_batch(
         self,
@@ -88,22 +140,16 @@ class ZoomBatchRenderer:
         return final_path
 
     def render_single(self, image_path: Path, output_path: Path, request: RenderRequest) -> None:
-        from depthflow.scene import DepthScene
         from shaderflow.scene import WindowBackend
 
-        class HouseTourRenderScene(DepthScene):
-            def update(self) -> None:
-                DepthScene.update(self)
-                # A subtle lateral slide feels closer to a real interior walkthrough
-                # than a straight promo-style zoom-in.
-                self.state.offset = (0.12 * math.sin(self.cycle), 0.0)
-                self.state.zoom = 0.98 + 0.04 * (1 - math.cos(self.cycle)) / 2
+        from depthflow.scene import DepthScene
 
-        scene = HouseTourRenderScene(backend=WindowBackend.Headless)
+        scene = DepthScene(backend=WindowBackend.Headless)
         try:
             self._apply_resize_compat(scene)
             scene.initialize()
             scene.input(image=image_path)
+            self._apply_motion_profile(scene, request.mode)
 
             main_kwargs = {
                 "output": output_path,
@@ -114,6 +160,10 @@ class ZoomBatchRenderer:
                 main_kwargs["width"] = request.width
             if request.height is not None:
                 main_kwargs["height"] = request.height
+            if request.quality is not None:
+                main_kwargs["quality"] = request.quality
+            if request.ssaa is not None:
+                main_kwargs["ssaa"] = request.ssaa
 
             scene.main(**main_kwargs)
         finally:

@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from depthflow_api.jobs import JobManager
 from depthflow_api.models import (
     JobCreatedResponse,
+    RenderMode,
     JobState,
     JobStatus,
     OutputTarget,
@@ -55,6 +56,9 @@ def create_app(
         fps: Annotated[int, Form()] = 30,
         width: Annotated[int | None, Form()] = None,
         height: Annotated[int | None, Form()] = None,
+        mode: Annotated[RenderMode, Form()] = RenderMode.tour,
+        quality: Annotated[int | None, Form()] = None,
+        ssaa: Annotated[float | None, Form()] = None,
         output_name: Annotated[str, Form()] = "final.mp4",
         output_target: Annotated[OutputTarget | None, Form()] = None,
     ) -> JobCreatedResponse:
@@ -68,6 +72,10 @@ def create_app(
             raise HTTPException(status_code=400, detail="width must be positive")
         if height is not None and height <= 0:
             raise HTTPException(status_code=400, detail="height must be positive")
+        if quality is not None and not 0 <= quality <= 100:
+            raise HTTPException(status_code=400, detail="quality must be between 0 and 100")
+        if ssaa is not None and ssaa <= 0:
+            raise HTTPException(status_code=400, detail="ssaa must be positive")
 
         resolved_output_target = output_target or default_output_target()
         safe_output_name = _normalize_output_name(output_name)
@@ -101,6 +109,9 @@ def create_app(
             fps=fps,
             width=width,
             height=height,
+            mode=mode,
+            quality=quality,
+            ssaa=ssaa,
             output_name=safe_output_name,
             output_path=final_output_path,
             output_target=resolved_output_target,

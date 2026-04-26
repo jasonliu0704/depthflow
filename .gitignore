@@ -1,8 +1,56 @@
-.cache
-site
-.depthflow-api/
-.venv-depthflow-api/
-dist/
-output/
-*.mp4
+# Local caches and environments
+.cache/
 __pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+.venv/
+.venv-*/
+.venv-depthflow-api/
+
+# Build and documentation output
+site/
+dist/
+build/
+
+# DepthFlow/API generated render output
+.depthflow-api/
+effect-mode-tests/
+output/
+outputs/
+renders/
+videos/
+frames/
+screenshots/
+screenshot.png
+output.*
+
+# Generated video/media files
+*.mp4
+*.mov
+*.m4v
+*.mkv
+*.avi
+*.webm
+*.gif
+
+# Large generated archives and model/checkpoint artifacts
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.bin
+*.npy
+*.npz
+
+# Local test input drops
+/*.jpg
+/*.jpeg
+/*.png

@@ -80,6 +80,19 @@ Form fields:
   - optional
   - integer
   - if omitted, render height follows the source image / DepthFlow defaults
+- `mode`
+  - optional
+  - enum: `gentle`, `tour`, `drift`
+  - default: `tour`
+  - controls the camera motion profile used for the parallax clip
+- `quality`
+  - optional
+  - integer from `0` to `100`
+  - forwards DepthFlow's projection quality setting
+- `ssaa`
+  - optional
+  - positive number
+  - forwards DepthFlow's super-sampling setting for smoother edges
 - `output_name`
   - optional
   - string
@@ -123,7 +136,7 @@ Typical failures:
   - no images uploaded
   - unsupported file extension
   - unsupported content type
-  - invalid `clip_duration_seconds`, `fps`, `width`, or `height`
+  - invalid `clip_duration_seconds`, `fps`, `width`, `height`, `quality`, or `ssaa`
 - `500 Internal Server Error`
   - server-side configuration or runtime failure
   - for example, Azure output requested but Azure storage is not configured
@@ -144,6 +157,9 @@ curl -X POST "http://127.0.0.1:8000/jobs/zoom-batch" \
   -F "images=@/absolute/path/image-2.jpg" \
   -F "clip_duration_seconds=5" \
   -F "fps=30" \
+  -F "mode=tour" \
+  -F "quality=72" \
+  -F "ssaa=1.75" \
   -F "output_name=demo.mp4"
 ```
 
@@ -155,6 +171,9 @@ form.append("images", fileInput1.files[0]);
 form.append("images", fileInput2.files[0]);
 form.append("clip_duration_seconds", "5");
 form.append("fps", "30");
+form.append("mode", "tour");
+form.append("quality", "72");
+form.append("ssaa", "1.75");
 form.append("output_name", "demo.mp4");
 form.append("output_target", "local");
 

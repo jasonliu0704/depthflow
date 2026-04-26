@@ -19,6 +19,12 @@ class OutputTarget(str, Enum):
     azure = "azure"
 
 
+class RenderMode(str, Enum):
+    gentle = "gentle"
+    tour = "tour"
+    drift = "drift"
+
+
 class RenderRequest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -27,6 +33,9 @@ class RenderRequest(BaseModel):
     fps: int = Field(default=30, gt=0)
     width: Optional[int] = Field(default=None, gt=0)
     height: Optional[int] = Field(default=None, gt=0)
+    mode: RenderMode = RenderMode.tour
+    quality: Optional[int] = Field(default=None, ge=0, le=100)
+    ssaa: Optional[float] = Field(default=None, gt=0)
     output_name: str = Field(default="final.mp4", min_length=1)
     output_path: Optional[Path] = None
     output_target: OutputTarget = OutputTarget.local

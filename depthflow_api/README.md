@@ -11,7 +11,7 @@ If the repo-level [`background-musics`](/Users/jk/project/DepthFlow/background-m
 - `POST /jobs/zoom-batch`
   - accepts `multipart/form-data`
   - field `images` can be repeated
-  - optional fields: `clip_duration_seconds`, `fps`, `width`, `height`, `output_name`, `output_target`
+  - optional fields: `clip_duration_seconds`, `fps`, `width`, `height`, `mode`, `quality`, `ssaa`, `output_name`, `output_target`
   - returns `job_id`, `status`, `status_url`
 - `GET /jobs/{job_id}`
   - returns job state, progress, and `final_video_url` when completed
@@ -96,6 +96,9 @@ curl -X POST "http://127.0.0.1:8000/jobs/zoom-batch" \
   -F "images=@/absolute/path/image-2.jpg" \
   -F "clip_duration_seconds=5" \
   -F "fps=30" \
+  -F "mode=tour" \
+  -F "quality=72" \
+  -F "ssaa=1.75" \
   -F "width=1280" \
   -F "output_name=my-batch.mp4"
 ```

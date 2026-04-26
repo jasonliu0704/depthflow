@@ -4,7 +4,9 @@ import json
 import math
 import shutil
 import subprocess
+import sys
 import threading
+import types
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from depthflow_api.app import create_app
 from depthflow_api.jobs import JobManager
-from depthflow_api.models import OutputTarget, RenderRequest
+from depthflow_api.models import OutputTarget, RenderMode, RenderRequest
 from depthflow_api.renderer import ZoomBatchRenderer
 from depthflow_api.storage import AzureBlobStorage
 
@@ -47,6 +49,16 @@ class FakeRenderer(ZoomBatchRenderer):
         output.write_bytes(b"fake-mp4")
         progress(len(request.image_paths), "completed local render")
         return output
+
+
+class CapturingRenderer(FakeRenderer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.requests: list[RenderRequest] = []
+
+    def render_batch(self, request: RenderRequest, job_dir: Path, progress):
+        self.requests.append(request)
+        return super().render_batch(request, job_dir, progress)
 
 
 class FakeStorage:
@@ -127,6 +139,38 @@ def test_job_creation_and_completion(client: TestClient):
     assert file_response.content == b"fake-mp4"
 
 
+def test_job_creation_accepts_render_tuning_fields(tmp_path: Path):
+    jobs = ImmediateJobManager(tmp_path)
+    renderer = CapturingRenderer()
+    app = create_app(
+        jobs=jobs,
+        renderer=renderer,
+        storage_factory=lambda: FakeStorage(),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/jobs/zoom-batch",
+        files=[("images", ("one.png", PNG_BYTES, "image/png"))],
+        data={
+            "mode": "drift",
+            "quality": "72",
+            "ssaa": "1.75",
+            "width": "1080",
+            "height": "1920",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(renderer.requests) == 1
+    request = renderer.requests[0]
+    assert request.mode == RenderMode.drift
+    assert request.quality == 72
+    assert math.isclose(request.ssaa or 0, 1.75)
+    assert request.width == 1080
+    assert request.height == 1920
+
+
 def test_local_output_honors_specified_path(tmp_path: Path):
     jobs = ImmediateJobManager(tmp_path / "jobs")
     app = create_app(
@@ -191,6 +235,89 @@ def test_job_failure_state(tmp_path: Path):
     job = client.get(response.json()["status_url"])
     assert job.json()["status"] == "failed"
     assert job.json()["error"] == "render failed"
+
+
+def test_rejects_invalid_quality_and_ssaa(client: TestClient):
+    bad_quality = client.post(
+        "/jobs/zoom-batch",
+        files=[("images", ("one.png", PNG_BYTES, "image/png"))],
+        data={"quality": "101"},
+    )
+    assert bad_quality.status_code == 400
+    assert bad_quality.json()["detail"] == "quality must be between 0 and 100"
+
+    bad_ssaa = client.post(
+        "/jobs/zoom-batch",
+        files=[("images", ("one.png", PNG_BYTES, "image/png"))],
+        data={"ssaa": "0"},
+    )
+    assert bad_ssaa.status_code == 400
+    assert bad_ssaa.json()["detail"] == "ssaa must be positive"
+
+
+def test_motion_profiles_do_not_enable_green_inpaint_mask(monkeypatch: pytest.MonkeyPatch):
+    fake_depthflow_scene = types.ModuleType("depthflow.scene")
+
+    class FakeDepthScene:
+        def update(self) -> None:
+            pass
+
+    fake_depthflow_scene.DepthScene = FakeDepthScene
+    monkeypatch.setitem(sys.modules, "depthflow.scene", fake_depthflow_scene)
+
+    class FakeImage:
+        size = (1080, 1920)
+
+    class FakeState:
+        def __init__(self) -> None:
+            self.steady = 0.0
+            self.focus = 0.0
+            self.isometric = 0.0
+            self.height = 0.0
+            self.inpaint = type("FakeInpaint", (), {"limit": 0.0})()
+
+    class FakeScene:
+        def __init__(self) -> None:
+            self.image = FakeImage()
+            self.state = FakeState()
+
+    for mode in (RenderMode.gentle, RenderMode.tour, RenderMode.drift):
+        scene = FakeScene()
+        ZoomBatchRenderer._apply_motion_profile(scene, mode)
+        assert scene.state.inpaint.limit == 0.0
+
+
+def test_tour_motion_profile_applies_extra_zoom_effect(monkeypatch: pytest.MonkeyPatch):
+    fake_depthflow_scene = types.ModuleType("depthflow.scene")
+
+    class FakeDepthScene:
+        def update(self) -> None:
+            pass
+
+    fake_depthflow_scene.DepthScene = FakeDepthScene
+    monkeypatch.setitem(sys.modules, "depthflow.scene", fake_depthflow_scene)
+
+    class FakeImage:
+        size = (1920, 1080)
+
+    class FakeState:
+        def __init__(self) -> None:
+            self.steady = 0.0
+            self.focus = 0.0
+            self.isometric = 0.0
+            self.height = 0.0
+
+    class FakeScene:
+        def __init__(self) -> None:
+            self.image = FakeImage()
+            self.state = FakeState()
+            self.cycle = math.pi
+
+    scene = FakeScene()
+    ZoomBatchRenderer._apply_motion_profile(scene, RenderMode.tour)
+    scene.update()
+
+    assert math.isclose(scene.state.zoom, 1.05)
 
 
 def test_job_manager_persists_status(tmp_path: Path):

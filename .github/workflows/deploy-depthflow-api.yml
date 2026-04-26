@@ -1,0 +1,88 @@
+name: deploy-depthflow-api
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deploy-depthflow-api.yml"
+      - ".dockerignore"
+      - "Dockerfile.depthflow-api"
+      - "background-musics/**"
+      - "depthflow/**"
+      - "depthflow_api/**"
+      - "pyproject.toml"
+      - "scripts/package_depthflow_api.sh"
+      - "scripts/run_depthflow_api.sh"
+      - "deploy/docker/**"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: |
+          docker build -f Dockerfile.depthflow-api -t depthflow-api:deploy .
+
+      - name: Save API image archive
+        run: |
+          mkdir -p dist
+          docker save depthflow-api:deploy | gzip > dist/depthflow-api-image.tar.gz
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: depthflow-api-package
+          path: |
+            dist/depthflow-api-image.tar.gz
+            deploy/docker/compose.yml
+            deploy/docker/deploy.sh
+            deploy/docker/depthflow-api.env.example
+          if-no-files-found: error
+
+  deploy:
+    needs: package
+    runs-on: ubuntu-latest
+    if: ${{ secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != '' }}
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: depthflow-api-package
+          path: deploy-package
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Trust deploy host
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload deployment bundle
+        run: |
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/depthflow-api}"
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          scp \
+            deploy-package/compose.yml \
+            deploy-package/deploy.sh \
+            deploy-package/depthflow-api.env.example \
+            deploy-package/depthflow-api-image.tar.gz \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Run remote deploy
+        run: |
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/depthflow-api}"
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "
+            chmod +x '$DEPLOY_PATH/deploy.sh' &&
+            APP_DIR='$DEPLOY_PATH' bash '$DEPLOY_PATH/deploy.sh'
+          "
