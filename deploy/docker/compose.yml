@@ -3,6 +3,8 @@ services:
     image: ${DEPTHFLOW_API_IMAGE:-depthflow-api:deploy}
     container_name: depthflow-api
     restart: unless-stopped
+    env_file:
+      - ../../.env
     ports:
       - "${HOST_PORT:-8000}:8000"
     environment:

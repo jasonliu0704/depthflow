@@ -17,6 +17,7 @@ The API supports one workflow:
 
 The server renders one zoom clip per uploaded image, stitches the clips in upload order, and exposes the final `.mp4`.
 When local audio files are present in [`background-musics`](/Users/jk/project/DepthFlow/background-musics), the final stitch step randomly picks one track as background music and trims it to the rendered video length.
+When a request includes `speech_text`, the server generates narration with Azure Speech and adds it to the final video. It also adds a selectable `mov_text` subtitle track tagged as `eng`, synced from Azure word-boundary timings. If background music is available, it is mixed quietly behind the narration.
 
 ## Authentication
 
@@ -93,6 +94,16 @@ Form fields:
   - optional
   - positive number
   - forwards DepthFlow's super-sampling setting for smoother edges
+- `speech_text`
+  - optional
+  - string
+  - when present, synthesizes narration audio with Azure Speech and muxes it into the final video
+  - also adds sentence-level soft subtitles as a `mov_text` track synced to the generated voice
+- `speech_voice`
+  - optional
+  - string
+  - overrides the server's `AZURE_SPEECH_VOICE` for this job
+  - default server voice: `en-US-FableTurboMultilingualNeural`
 - `output_name`
   - optional
   - string
@@ -160,6 +171,7 @@ curl -X POST "http://127.0.0.1:8000/jobs/zoom-batch" \
   -F "mode=tour" \
   -F "quality=72" \
   -F "ssaa=1.75" \
+  -F "speech_text=Hello, welcome to Avatar Talk AI." \
   -F "output_name=demo.mp4"
 ```
 
@@ -174,6 +186,7 @@ form.append("fps", "30");
 form.append("mode", "tour");
 form.append("quality", "72");
 form.append("ssaa", "1.75");
+form.append("speech_text", "Hello, welcome to Avatar Talk AI.");
 form.append("output_name", "demo.mp4");
 form.append("output_target", "local");
 

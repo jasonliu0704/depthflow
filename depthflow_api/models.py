@@ -36,6 +36,8 @@ class RenderRequest(BaseModel):
     mode: RenderMode = RenderMode.tour
     quality: Optional[int] = Field(default=None, ge=0, le=100)
     ssaa: Optional[float] = Field(default=None, gt=0)
+    speech_text: Optional[str] = None
+    speech_voice: Optional[str] = None
     output_name: str = Field(default="final.mp4", min_length=1)
     output_path: Optional[Path] = None
     output_target: OutputTarget = OutputTarget.local

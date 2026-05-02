@@ -6,12 +6,15 @@ By default, the final video is kept locally and exposed by the API itself throug
 
 If the repo-level [`background-musics`](/Users/jk/project/DepthFlow/background-musics) folder contains audio files, the stitch step randomly selects one track and adds it as background music. The audio is automatically trimmed so it never outlasts the final video.
 
+Jobs can also include `speech_text`. When present, the API uses Azure Speech synthesis to generate narration audio and muxes it into the final video. The final MP4 also includes a selectable `mov_text` subtitle track synced from Azure word-boundary timings. If background music is available, it is mixed quietly under the narration.
+
 ## What It Exposes
 
 - `POST /jobs/zoom-batch`
   - accepts `multipart/form-data`
   - field `images` can be repeated
-  - optional fields: `clip_duration_seconds`, `fps`, `width`, `height`, `mode`, `quality`, `ssaa`, `output_name`, `output_target`
+  - optional fields: `clip_duration_seconds`, `fps`, `width`, `height`, `mode`, `quality`, `ssaa`, `speech_text`, `speech_voice`, `output_name`, `output_target`
+  - when `speech_text` is provided, the completed MP4 includes synced soft subtitles tagged as `eng`
   - returns `job_id`, `status`, `status_url`
 - `GET /jobs/{job_id}`
   - returns job state, progress, and `final_video_url` when completed
@@ -25,6 +28,7 @@ If the repo-level [`background-musics`](/Users/jk/project/DepthFlow/background-m
 - a working DepthFlow runtime on the machine where the API runs
   - this includes the project dependencies such as `shaderflow`, `torch`, `transformers`, and related render/runtime packages
 - Azure Blob Storage is optional and only needed when using `output_target=azure`
+- Azure Speech is optional and only needed when sending `speech_text`
 
 ## Required Environment Variables
 
@@ -41,6 +45,14 @@ If the repo-level [`background-musics`](/Users/jk/project/DepthFlow/background-m
 - `AZURE_PUBLIC_BASE_URL`
   - optional unless `output_target=azure`
   - example: `https://myaccount.blob.core.windows.net/my-public-container`
+- `AZURE_SPEECH_KEY`
+  - optional unless request form field `speech_text` is used
+- `AZURE_SPEECH_ENDPOINT`
+  - optional unless request form field `speech_text` is used
+  - example: `https://eastus.api.cognitive.microsoft.com/`
+- `AZURE_SPEECH_VOICE`
+  - optional
+  - default: `en-US-FableTurboMultilingualNeural`
 - `HOST`
   - optional
   - default `0.0.0.0`
@@ -100,6 +112,7 @@ curl -X POST "http://127.0.0.1:8000/jobs/zoom-batch" \
   -F "quality=72" \
   -F "ssaa=1.75" \
   -F "width=1280" \
+  -F "speech_text=Hello, welcome to Avatar Talk AI." \
   -F "output_name=my-batch.mp4"
 ```
 

@@ -1,4 +1,5 @@
 # Local caches and environments
+.env
 .cache/
 __pycache__/
 .pytest_cache/

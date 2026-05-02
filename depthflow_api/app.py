@@ -8,6 +8,7 @@ from typing import Annotated, Callable
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from depthflow_api.env import load_env_file
 from depthflow_api.jobs import JobManager
 from depthflow_api.models import (
     JobCreatedResponse,
@@ -19,6 +20,8 @@ from depthflow_api.models import (
 )
 from depthflow_api.renderer import ZoomBatchRenderer
 from depthflow_api.storage import AzureBlobStorage
+
+load_env_file()
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 
@@ -59,6 +62,8 @@ def create_app(
         mode: Annotated[RenderMode, Form()] = RenderMode.tour,
         quality: Annotated[int | None, Form()] = None,
         ssaa: Annotated[float | None, Form()] = None,
+        speech_text: Annotated[str | None, Form()] = None,
+        speech_voice: Annotated[str | None, Form()] = None,
         output_name: Annotated[str, Form()] = "final.mp4",
         output_target: Annotated[OutputTarget | None, Form()] = None,
     ) -> JobCreatedResponse:
@@ -76,6 +81,8 @@ def create_app(
             raise HTTPException(status_code=400, detail="quality must be between 0 and 100")
         if ssaa is not None and ssaa <= 0:
             raise HTTPException(status_code=400, detail="ssaa must be positive")
+        normalized_speech_text = _normalize_optional_text(speech_text)
+        normalized_speech_voice = _normalize_optional_text(speech_voice)
 
         resolved_output_target = output_target or default_output_target()
         safe_output_name = _normalize_output_name(output_name)
@@ -112,6 +119,8 @@ def create_app(
             mode=mode,
             quality=quality,
             ssaa=ssaa,
+            speech_text=normalized_speech_text,
+            speech_voice=normalized_speech_voice,
             output_name=safe_output_name,
             output_path=final_output_path,
             output_target=resolved_output_target,
@@ -205,6 +214,13 @@ def _normalize_output_name(output_name: str) -> str:
     if not name.lower().endswith(".mp4"):
         name = f"{name}.mp4"
     return name
+
+
+def _normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _resolve_final_output_path(output_name: str, output_target: OutputTarget, job_dir: Path) -> Path:

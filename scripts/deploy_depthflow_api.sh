@@ -9,6 +9,14 @@ HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 UVICORN_LOG_LEVEL="${UVICORN_LOG_LEVEL:-info}"
+ENV_FILE="${DEPTHFLOW_API_ENV_FILE:-$ROOT_DIR/.env}"
+
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
 
 if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "ffmpeg is required on PATH" >&2
@@ -31,6 +39,17 @@ python -m pip install --force-reinstall "$ROOT_DIR"/dist/depthflow-*.whl
 
 export DEPTHFLOW_API_WORKDIR="${DEPTHFLOW_API_WORKDIR:-$ROOT_DIR/.depthflow-api}"
 export DEPTHFLOW_API_DEFAULT_OUTPUT_TARGET="${DEPTHFLOW_API_DEFAULT_OUTPUT_TARGET:-local}"
+export DEPTHFLOW_API_ENV_FILE="$ENV_FILE"
+
+# Azure Speech (TTS) — required when callers pass speech_text to /jobs/zoom-batch.
+# Pass-through only: leave unset to disable speech synthesis.
+export AZURE_SPEECH_KEY="${AZURE_SPEECH_KEY:-}"
+export AZURE_SPEECH_ENDPOINT="${AZURE_SPEECH_ENDPOINT:-}"
+export AZURE_SPEECH_VOICE="${AZURE_SPEECH_VOICE:-}"
+
+if [[ -z "${AZURE_SPEECH_KEY}" || -z "${AZURE_SPEECH_ENDPOINT}" ]]; then
+  echo "[deploy_depthflow_api] AZURE_SPEECH_KEY / AZURE_SPEECH_ENDPOINT not set — speech_text requests will fail." >&2
+fi
 
 exec python -m uvicorn \
   depthflow_api.app:app \

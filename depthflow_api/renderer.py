@@ -9,21 +9,38 @@ import subprocess
 import tempfile
 from pathlib import Path
 from types import MethodType
-from typing import Callable
+from typing import Callable, Protocol
 
 from depthflow_api.models import RenderMode, RenderRequest
+from depthflow_api.subtitles import write_srt
+from depthflow_api.tts import AzureTextToSpeech, SpeechSynthesisResult
 
 ProgressCallback = Callable[[int, str], None]
 BACKGROUND_MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac"}
 
 
+class TextToSpeech(Protocol):
+    def synthesize_to_file(
+        self,
+        text: str,
+        output_path: Path,
+        voice_name: str | None = None,
+    ) -> SpeechSynthesisResult:
+        ...
+
+
 class ZoomBatchRenderer:
-    def __init__(self, background_music_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        background_music_dir: Path | None = None,
+        text_to_speech: TextToSpeech | None = None,
+    ) -> None:
         self.background_music_dir = (
             Path(background_music_dir)
             if background_music_dir is not None
             else Path(__file__).resolve().parent.parent / "background-musics"
         )
+        self.text_to_speech = text_to_speech
 
     @staticmethod
     def _apply_resize_compat(scene) -> None:
@@ -115,11 +132,12 @@ class ZoomBatchRenderer:
         final_path = request.output_path or (job_dir / request.output_name)
         final_path.parent.mkdir(parents=True, exist_ok=True)
         background_music = self.choose_background_music()
-        if background_music is None:
+        if background_music is None and request.speech_text is None:
             self.concat_videos(manifest, final_path)
             progress(len(clip_paths), "completed local render")
             return final_path
 
+        temporary_paths: list[Path] = []
         with tempfile.NamedTemporaryFile(
             prefix="depthflow-stitch-",
             suffix=".mp4",
@@ -127,17 +145,67 @@ class ZoomBatchRenderer:
             delete=False,
         ) as handle:
             stitched_path = Path(handle.name)
+        temporary_paths.append(stitched_path)
 
         try:
             self.concat_videos(manifest, stitched_path)
-            progress(len(clip_paths), f"adding background music: {background_music.name}")
-            self.add_background_music(stitched_path, background_music, final_path)
+            if request.speech_text is not None:
+                with tempfile.NamedTemporaryFile(
+                    prefix="depthflow-speech-",
+                    suffix=".wav",
+                    dir=job_dir,
+                    delete=False,
+                ) as handle:
+                    speech_path = Path(handle.name)
+                temporary_paths.append(speech_path)
+
+                progress(len(clip_paths), "generating speech audio")
+                speech_result = self.get_text_to_speech().synthesize_to_file(
+                    request.speech_text,
+                    speech_path,
+                    voice_name=request.speech_voice,
+                )
+                subtitles_path = write_srt(
+                    speech_result.word_boundaries,
+                    job_dir / "captions.srt",
+                )
+                subtitles_path = subtitles_path if subtitles_path.exists() else None
+                if background_music is None:
+                    progress(len(clip_paths), "adding speech audio")
+                    self.add_speech_audio(
+                        stitched_path,
+                        speech_result.audio_path,
+                        final_path,
+                        subtitles_path=subtitles_path,
+                    )
+                else:
+                    progress(
+                        len(clip_paths),
+                        f"mixing speech with background music: {background_music.name}",
+                    )
+                    self.add_speech_with_background_music(
+                        stitched_path,
+                        speech_result.audio_path,
+                        background_music,
+                        final_path,
+                        subtitles_path=subtitles_path,
+                    )
+            else:
+                assert background_music is not None
+                progress(len(clip_paths), f"adding background music: {background_music.name}")
+                self.add_background_music(stitched_path, background_music, final_path)
         finally:
-            with contextlib.suppress(FileNotFoundError):
-                stitched_path.unlink()
+            for temporary_path in temporary_paths:
+                with contextlib.suppress(FileNotFoundError):
+                    temporary_path.unlink()
 
         progress(len(clip_paths), "completed local render")
         return final_path
+
+    def get_text_to_speech(self) -> TextToSpeech:
+        if self.text_to_speech is None:
+            self.text_to_speech = AzureTextToSpeech.from_env()
+        return self.text_to_speech
 
     def render_single(self, image_path: Path, output_path: Path, request: RenderRequest) -> None:
         from shaderflow.scene import WindowBackend
@@ -294,6 +362,138 @@ class ZoomBatchRenderer:
         )
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or "ffmpeg audio mux failed")
+
+    def add_speech_audio(
+        self,
+        video_path: Path,
+        speech_path: Path,
+        output_path: Path,
+        subtitles_path: Path | None = None,
+    ) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg executable was not found on PATH")
+
+        command = [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(video_path),
+            "-i",
+            str(speech_path),
+        ]
+        if subtitles_path is not None:
+            command.extend(["-i", str(subtitles_path)])
+
+        command.extend(
+            [
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+            ]
+        )
+        if subtitles_path is not None:
+            command.extend(["-map", "2:s:0"])
+
+        command.extend(
+            [
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-af",
+                "apad",
+            ]
+        )
+        if subtitles_path is not None:
+            command.extend(
+                [
+                    "-c:s",
+                    "mov_text",
+                    "-metadata:s:s:0",
+                    "language=eng",
+                ]
+            )
+        command.extend(["-shortest", str(output_path)])
+
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or "ffmpeg speech mux failed")
+
+    def add_speech_with_background_music(
+        self,
+        video_path: Path,
+        speech_path: Path,
+        music_path: Path,
+        output_path: Path,
+        subtitles_path: Path | None = None,
+    ) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg executable was not found on PATH")
+
+        command = [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(video_path),
+            "-i",
+            str(speech_path),
+            "-stream_loop",
+            "-1",
+            "-i",
+            str(music_path),
+        ]
+        if subtitles_path is not None:
+            command.extend(["-i", str(subtitles_path)])
+
+        command.extend(
+            [
+                "-filter_complex",
+                "[1:a]volume=1.0,apad[speech];"
+                "[2:a]volume=0.12[music];"
+                "[speech][music]amix=inputs=2:duration=longest:"
+                "dropout_transition=0,apad[aout]",
+                "-map",
+                "0:v:0",
+                "-map",
+                "[aout]",
+            ]
+        )
+        if subtitles_path is not None:
+            command.extend(["-map", "3:s:0"])
+
+        command.extend(
+            [
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+            ]
+        )
+        if subtitles_path is not None:
+            command.extend(
+                [
+                    "-c:s",
+                    "mov_text",
+                    "-metadata:s:s:0",
+                    "language=eng",
+                ]
+            )
+        command.extend(["-shortest", str(output_path)])
+
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or "ffmpeg speech/music mux failed")
 
     @staticmethod
     def _ffmpeg_escape(path: Path) -> str:
